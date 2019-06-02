@@ -72,7 +72,12 @@ impl Peer {
 impl Actor for Peer {
     type Context = actix::Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {}
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.run_later(Duration::from_secs(1), |peer, ct| {
+           println!("Peer {:?} outbound connections: {:?}", peer.id, peer.outbound.keys().collect::<Vec<_>>());
+           println!("Peer {:?} inbound connections: {:?}", peer.id, peer.inbound.keys().collect::<Vec<_>>());
+        });
+    }
 
     fn stopping(&mut self, _: &mut Self::Context) -> Running {
         Running::Stop
