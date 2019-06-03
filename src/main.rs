@@ -1,9 +1,8 @@
 mod peer;
+mod recset;
 
-use peer::Peer;
-use actix::prelude::*;
 use crate::peer::{Connect, PeerId};
-use std::sync::Arc;
+use actix::prelude::*;
 
 const NUM_PRIVATE_NODES: u32 = 8;
 const NUM_PUBLIC_NODES: u32 = 8;
@@ -16,9 +15,7 @@ fn main() {
         for id in 0u32..NUM_PUBLIC_NODES {
             let peer_id = PeerId::Public(id);
             let peer = peer::Peer::new(peer_id);
-            public_nodes.push((peer_id, Arbiter::start(|_| {
-                peer
-            })));
+            public_nodes.push((peer_id, Arbiter::start(|_| peer)));
         }
 
         let mut private_nodes = vec![];
@@ -29,13 +26,11 @@ fn main() {
                 peer.add_outbound_peer(*id, pub_peer.clone());
             }
 
-            private_nodes.push((peer_id, Arbiter::start(|_| {
-                peer
-            })));
+            private_nodes.push((peer_id, Arbiter::start(|_| peer)));
         }
 
         // Interconnect public nodes
-        for (this_id, public_peer) in public_nodes.iter() {
+        for (this_id, _public_peer) in public_nodes.iter() {
             for (other_id, other_public_peer) in public_nodes.iter() {
                 if *this_id != *other_id {
                     other_public_peer.do_send(Connect(*this_id));
@@ -44,8 +39,8 @@ fn main() {
         }
 
         // Connect all private nodes to the all public nodes
-        for (this_id, private_peer) in private_nodes.iter() {
-            for (other_id, other_public_peer) in public_nodes.iter() {
+        for (this_id, _private_peer) in private_nodes.iter() {
+            for (_other_id, other_public_peer) in public_nodes.iter() {
                 other_public_peer.do_send(Connect(*this_id));
             }
         }

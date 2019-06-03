@@ -1,10 +1,12 @@
 use actix::prelude::*;
 
-use rand::{self, Rng, thread_rng, seq::SliceRandom};
+use byteorder::{ByteOrder, LittleEndian};
+use rand::{self, seq::SliceRandom, Rng, SeedableRng};
+use rand_xorshift::XorShiftRng;
 
 use std::collections::HashMap;
-use std::time::Duration;
 use std::fmt::{Debug, Error, Formatter};
+use std::time::Duration;
 
 #[derive(Debug, Copy, Clone, Message)]
 pub struct Tx(pub [u8; 32]);
@@ -35,6 +37,8 @@ pub struct Peer {
 
     /// Inbound connections
     pub inbound: HashMap<PeerId, Addr<Peer>>,
+
+    seed: u64,
 }
 
 impl Debug for PeerId {
@@ -46,12 +50,25 @@ impl Debug for PeerId {
     }
 }
 
+impl Into<u64> for PeerId {
+    fn into(self) -> u64 {
+        let id = match self {
+            PeerId::Public(id) => id + 1,
+            PeerId::Private(id) => (id + 1) << 16,
+        };
+
+        id as u64
+    }
+}
+
 impl Peer {
     pub fn new(id: PeerId) -> Self {
         Peer {
             id,
             outbound: HashMap::new(),
-            inbound: HashMap::new()
+            inbound: HashMap::new(),
+
+            seed: id.into(),
         }
     }
 
@@ -73,9 +90,17 @@ impl Actor for Peer {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(1), |peer, ct| {
-           println!("Peer {:?} outbound connections: {:?}", peer.id, peer.outbound.keys().collect::<Vec<_>>());
-           println!("Peer {:?} inbound connections: {:?}", peer.id, peer.inbound.keys().collect::<Vec<_>>());
+        ctx.run_later(Duration::from_secs(5), |peer, _ct| {
+            println!(
+                "Peer {:?} outbound connections: {:?}",
+                peer.id,
+                peer.outbound.keys().collect::<Vec<_>>()
+            );
+            println!(
+                "Peer {:?} inbound connections: {:?}",
+                peer.id,
+                peer.inbound.keys().collect::<Vec<_>>()
+            );
         });
     }
 
@@ -87,11 +112,15 @@ impl Actor for Peer {
 impl Handler<Tx> for Peer {
     type Result = ();
 
-    fn handle(&mut self, msg: Tx, ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: Tx, _ctx: &mut Context<Self>) {
         // Perform low-fanout flooding if it is a public node
         if self.is_public() {
-            let mut rng = thread_rng();
-            let mut peers = self.outbound.clone();
+            let mut seed = [0u8; 16];
+            LittleEndian::write_u64(&mut seed, self.seed);
+
+            let mut rng = XorShiftRng::from_seed(seed);
+
+            let peers = self.outbound.clone();
             {
                 let mut peers = peers.values().collect::<Vec<_>>();
                 peers.shuffle(&mut rng);
@@ -100,6 +129,10 @@ impl Handler<Tx> for Peer {
                     peer.do_send(msg);
                 }
             }
+
+            self.seed = rng.gen();
+        } else {
+            // TODO: fill reconciliation set
         }
     }
 }
@@ -110,7 +143,7 @@ impl Handler<Connect> for Peer {
     fn handle(&mut self, msg: Connect, ctx: &mut Context<Self>) {
         // Don't connect to self
         if msg.0 == self.id {
-            return
+            return;
         }
 
         println!("{:?} -> {:?};", msg.0, self.id);
@@ -119,7 +152,11 @@ impl Handler<Connect> for Peer {
         self.inbound.insert(msg.0, ctx.address());
 
         // Connect back
-        let is_private = match msg.0 { PeerId::Private(_) => true, _ => false };
+        let is_private = match msg.0 {
+            PeerId::Private(_) => true,
+            _ => false,
+        };
+
         if !is_private && !self.is_connected_to(msg.0) {
             self.add_outbound_peer(msg.0, ctx.address());
             ctx.address().do_send(Connect(self.id));
