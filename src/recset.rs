@@ -3,6 +3,7 @@
 use minisketch_rs;
 use minisketch_rs::Minisketch;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 
 /// Types that can produce short ID (short hash) can implement this trait.
@@ -12,14 +13,14 @@ pub trait ShortId<I> {
 
 /// A set that supports reconciliation by using short IDs (`I`) of its elements (`V`)
 #[derive(Debug)]
-pub struct RecSet<I: Hash + Eq + Copy + From<u64> + Into<u64>, V: ShortId<I> + Clone> {
+pub struct RecSet<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone> {
     capacity: usize,
     seed: Option<u64>,
     sketch: Minisketch,
     map: HashMap<I, V>,
 }
 
-impl<I: Hash + Eq + Copy + From<u64> + Into<u64>, V: ShortId<I> + Clone> RecSet<I, V> {
+impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone> RecSet<I, V> {
     /// Creates new set with given `capacity`.
     pub fn new(capacity: usize) -> Self {
         let _bits = std::mem::size_of::<I>() * 8;
@@ -96,6 +97,64 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64>, V: ShortId<I> + Clone> RecSet<
         Self::reconcile(&self.sketch(), sketch_b, self.capacity, self.seed)
     }
 
+    pub fn bisect_with(
+        a_whole: &[u8],
+        a_half: &[u8],
+        b_whole: &[u8],
+        b_half: &[u8],
+        capacity: usize,
+        seed: Option<u64>,
+    ) -> Result<Vec<I>, ()> {
+        // Extracts remainder sketch from a difference of two sketches
+        pub fn sub_sketches(s1: &[u8], s2: &[u8], d: usize, seed: Option<u64>) -> Vec<u8> {
+            let mut a = minisketch_rs::Minisketch::try_new(64, 0, d).unwrap();
+            if let Some(seed) = seed {
+                a.set_seed(seed);
+            }
+            a.deserialize(s1);
+
+            let mut b = minisketch_rs::Minisketch::try_new(64, 0, d).unwrap();
+            if let Some(seed) = seed {
+                b.set_seed(seed);
+            }
+            b.deserialize(s2);
+
+            a.merge(&b).expect("Sketch sub merge");
+
+            let mut elements = vec![0u64; d];
+            let res = a.decode(&mut elements);
+
+            let mut sketch = vec![0u8; a.serialized_size()];
+            a.serialize(&mut sketch).expect("Serialize sketch sub");
+
+            sketch
+        }
+
+        // Try bisection:
+        //
+        // res_1 = reconcile(a_half, b_half)
+        // res_2 = reconcile(a_whole - a_half, b_whole - b_half)
+        //
+        // differences = res_1 U res_2
+        //
+        // b_half is known to Alice since Bob sent his b_half sketch to her before bisect
+
+        let a_minus_a_2 = sub_sketches(&a_whole, &a_half, capacity, seed);
+        let b_minus_b_2 = sub_sketches(&b_whole, &b_half, capacity, seed);
+
+        let res_1 = RecSet::<I, V>::reconcile(&a_half, &b_half, capacity, seed);
+        let res_2 = RecSet::<I, V>::reconcile(&a_minus_a_2, &b_minus_b_2, capacity, seed);
+
+        res_1.and_then(|diffs1| {
+            res_2.and_then(|diffs2| {
+                Ok(diffs1
+                    .into_iter()
+                    .chain(diffs2.into_iter())
+                    .collect::<Vec<_>>())
+            })
+        })
+    }
+
     /// Produces sketch for this set.
     /// It is used in set reconciliation to find out what elements are missing in this set.
     pub fn sketch(&self) -> Vec<u8> {
@@ -166,7 +225,7 @@ mod test {
         let a = 0..32;
         let b = 0..8;
 
-        // Take only even elements of a set, so they're uniform,
+        // Take only even elements of a_whole set, so they're uniform,
         // to increase chance of bisect success
         let b_half = b
             .clone()
@@ -183,7 +242,7 @@ mod test {
             .map(|(_, n)| n)
             .collect::<Vec<_>>();
 
-        // Creates a set from a range of elements
+        // Creates a_whole set from a_whole range of elements
         pub fn set_from_range(
             range: impl IntoIterator<Item = u8>,
             capacity: usize,
@@ -198,76 +257,33 @@ mod test {
             set
         }
 
-        // Extracts remainder sketch from a difference of two sketches
-        pub fn sub_sketches(s1: &[u8], s2: &[u8], d: usize, seed: Option<u64>) -> Vec<u8> {
-            let mut a = minisketch_rs::Minisketch::try_new(64, 0, d).unwrap();
-            if let Some(seed) = seed {
-                a.set_seed(seed);
-            }
-            a.deserialize(s1);
-
-            let mut b = minisketch_rs::Minisketch::try_new(64, 0, d).unwrap();
-            if let Some(seed) = seed {
-                b.set_seed(seed);
-            }
-            b.deserialize(s2);
-
-            a.merge(&b).expect("Sketch sub merge");
-
-            let mut elements = vec![0u64; d];
-            let res = a.decode(&mut elements);
-
-            let mut sketch = vec![0u8; a.serialized_size()];
-            a.serialize(&mut sketch).expect("Serialize sketch sub");
-
-            sketch
-        }
-
         // Try regular reconciliation
 
         let mut alice_set_full = set_from_range(a, d);
-        let a = alice_set_full.sketch();
+        let a_whole = alice_set_full.sketch();
+        let a_half = set_from_range(a_half, d).sketch();
 
         let mut bob_set_full = set_from_range(b, d);
-        let b = bob_set_full.sketch();
+        let b_whole = bob_set_full.sketch();
+        let b_half = set_from_range(b_half, d).sketch();
 
-        let first_try = RecSet::<u64, Tx>::reconcile(&a, &b, d, None);
+        let first_try = RecSet::<u64, Tx>::reconcile(&a_whole, &b_whole, d, None);
         if let Err(()) = first_try {
             println!("Set overfull, trying bisect...");
 
             // Try bisection:
             //
-            // res_1 = reconcile(a/2, b/2)
-            // res_2 = reconcile(a - a/2, b - b/2)
+            // res_1 = reconcile(a_half, b_half)
+            // res_2 = reconcile(a_whole - a_half, b_whole - b_half)
             //
             // differences = res_1 U res_2
             //
-            // b/2 is known to Alice since Bob sent his b/2 sketch to her before bisect
+            // b_half is known to Alice since Bob sent his b_half sketch to her before bisect
 
-            let mut bob_set_half = set_from_range(b_half, d);
-            let b_2 = bob_set_half.sketch();
-
-            let mut alice_set_half = set_from_range(a_half, d);
-            let a_2 = alice_set_half.sketch();
-
-            let a_minus_a_2 = sub_sketches(&a, &a_2, d, None);
-            let b_minus_b_2 = sub_sketches(&b, &b_2, d, None);
-
-            let res_1 = RecSet::<u64, Tx>::reconcile(&a_2, &b_2, d, None);
-            let res_2 = RecSet::<u64, Tx>::reconcile(&a_minus_a_2, &b_minus_b_2, d, None);
-
-            if res_1.is_err() || res_2.is_err() {
-                println!("Failed: {:?}, {:?}", res_1, res_2);
-            } else {
-                let diffs1 = res_1.unwrap();
-                let diffs2 = res_2.unwrap();
-
-                let mut diffs = diffs1
-                    .into_iter()
-                    .chain(diffs2.into_iter())
-                    .collect::<Vec<_>>();
-                diffs.sort();
-                println!("Success: {} diffs {:?}", diffs.len(), diffs);
+            let res = RecSet::<u64, Tx>::bisect_with(&a_whole, &a_half, &b_whole, &b_half, d, None);
+            match res {
+                Ok(diffs) => println!("Success: {} diffs {:?}", diffs.len(), diffs),
+                Err(_) => println!("Bisection failed"),
             }
         } else {
             let mut diffs = first_try.ok().unwrap();
