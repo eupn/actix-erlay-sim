@@ -121,9 +121,6 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone>
 
             a.merge(&b).expect("Sketch sub merge");
 
-            let mut elements = vec![0u64; d];
-            let res = a.decode(&mut elements);
-
             let mut sketch = vec![0u8; a.serialized_size()];
             a.serialize(&mut sketch).expect("Serialize sketch sub");
 
