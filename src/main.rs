@@ -30,18 +30,24 @@ fn main() {
         }
 
         // Interconnect public nodes
-        for (this_id, _public_peer) in public_nodes.iter() {
+        for (this_id, public_peer) in public_nodes.iter() {
             for (other_id, other_public_peer) in public_nodes.iter() {
                 if *this_id != *other_id {
-                    other_public_peer.do_send(Connect(*this_id));
+                    other_public_peer.do_send(Connect {
+                        from_addr: public_peer.clone(),
+                        from_id: this_id.clone(),
+                    });
                 }
             }
         }
 
         // Connect all private nodes to the all public nodes
-        for (this_id, _private_peer) in private_nodes.iter() {
+        for (this_id, private_peer) in private_nodes.iter() {
             for (_other_id, other_public_peer) in public_nodes.iter() {
-                other_public_peer.do_send(Connect(*this_id));
+                other_public_peer.do_send(Connect {
+                    from_addr: private_peer.clone(),
+                    from_id: this_id.clone()
+                });
             }
         }
     });

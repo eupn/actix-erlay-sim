@@ -8,11 +8,26 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Error, Formatter};
 use std::time::Duration;
 
-#[derive(Debug, Copy, Clone, Message)]
+use crate::recset::{RecSet, ShortId};
+use siphasher::sip::SipHasher;
+use std::hash::Hasher;
+
+const RECONCILIATION_CAPACITY: usize = 128;
+
+#[derive(Debug, Copy, Clone)]
 pub struct Tx(pub [u8; 32]);
 
 #[derive(Debug, Copy, Clone, Message)]
-pub struct Connect(pub PeerId);
+pub struct PeerTx {
+    pub from: PeerId,
+    pub data: Tx,
+}
+
+#[derive(Debug, Clone, Message)]
+pub struct Connect {
+    pub from_addr: Addr<Peer>,
+    pub from_id: PeerId,
+}
 
 /// Defines possible states of the peer.
 #[derive(Debug, Copy, Clone)]
@@ -24,6 +39,14 @@ pub enum PeerState {
 pub enum PeerId {
     Public(u32),
     Private(u32),
+}
+
+impl ShortId<u64> for Tx {
+    fn short_id(&self) -> u64 {
+        let mut hasher = SipHasher::new_with_keys(0xDEu64, 0xADu64);
+        hasher.write(&self.0);
+        hasher.finish()
+    }
 }
 
 /// Describes single independent peer in the network.
@@ -38,6 +61,11 @@ pub struct Peer {
     /// Inbound connections
     pub inbound: HashMap<PeerId, Addr<Peer>>,
 
+    pub received_txs: HashMap<PeerId, HashMap<u64, Tx>>,
+
+    /// Sketches of transactions sets
+    pub sketches: HashMap<PeerId, RecSet<u64>>,
+
     seed: u64,
 }
 
@@ -46,6 +74,16 @@ impl Debug for PeerId {
         match self {
             PeerId::Public(id) => write!(f, "pub{}", id),
             PeerId::Private(id) => write!(f, "priv{}", id),
+        }
+    }
+}
+
+impl From<u64> for PeerId {
+    fn from(v: u64) -> Self {
+        if v < 1 << 16 {
+            PeerId::Public(v as u32 - 1)
+        } else {
+            PeerId::Private(v as u32)
         }
     }
 }
@@ -68,6 +106,8 @@ impl Peer {
             outbound: HashMap::new(),
             inbound: HashMap::new(),
 
+            received_txs: Default::default(),
+            sketches: Default::default(),
             seed: id.into(),
         }
     }
@@ -90,6 +130,26 @@ impl Actor for Peer {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.run_later(Duration::from_secs(1), |act, _| {
+            if !act.is_public() {
+                let mut tx_data = [0u8; 32];
+                let mut seed = [0u8; 16];
+                LittleEndian::write_u64(&mut seed, act.seed);
+                let mut rng = XorShiftRng::from_seed(seed);
+                rng.fill(&mut tx_data);
+                let tx = Tx(tx_data);
+
+                if let Some(addr) = act.outbound.values().collect::<Vec<_>>().first() {
+                    addr.do_send(PeerTx {
+                        from: act.id,
+                        data: tx
+                    });
+                }
+
+                act.seed = rng.gen();
+            }
+        });
+
         ctx.run_later(Duration::from_secs(5), |peer, _ct| {
             println!(
                 "Peer {:?} outbound connections: {:?}",
@@ -101,6 +161,13 @@ impl Actor for Peer {
                 peer.id,
                 peer.inbound.keys().collect::<Vec<_>>()
             );
+            println!(
+                "Peer {:?} txs:",
+                peer.id,
+            );
+            for (peer, tx) in peer.received_txs.iter() {
+                println!("From {:?}: {:?}", peer, tx.keys().collect::<Vec<_>>());
+            }
         });
     }
 
@@ -109,10 +176,17 @@ impl Actor for Peer {
     }
 }
 
-impl Handler<Tx> for Peer {
+impl Handler<PeerTx> for Peer {
     type Result = ();
 
-    fn handle(&mut self, msg: Tx, _ctx: &mut Context<Self>) {
+    fn handle(&mut self, msg: PeerTx, _ctx: &mut Context<Self>) {
+        // Don't relay nor save already processed transaction
+        for set in self.received_txs.values() {
+            if set.contains_key(&msg.data.short_id()) {
+                return
+            }
+        }
+
         // Perform low-fanout flooding if it is a public node
         if self.is_public() {
             let mut seed = [0u8; 16];
@@ -122,17 +196,39 @@ impl Handler<Tx> for Peer {
 
             let peers = self.outbound.clone();
             {
-                let mut peers = peers.values().collect::<Vec<_>>();
+                let mut peers = peers.iter().collect::<Vec<_>>();
                 peers.shuffle(&mut rng);
 
-                for peer in peers.into_iter().take(8) {
-                    peer.do_send(msg);
+                for (_, peer) in peers.into_iter().take(8) {
+                    let new_msg = PeerTx {
+                        from: self.id,
+                        data: msg.data,
+                    };
+
+                    peer.do_send(new_msg);
                 }
             }
 
             self.seed = rng.gen();
         } else {
-            // TODO: fill reconciliation set
+            if !self.sketches.contains_key(&msg.from) {
+                self.sketches.insert(msg.from, RecSet::new(RECONCILIATION_CAPACITY));
+            }
+
+            if let Some(sketch) = self.sketches.get_mut(&msg.from) {
+                let txid = msg.data.short_id();
+                if !sketch.contains(&txid) {
+                    sketch.insert(txid);
+                }
+            }
+        }
+
+        if !self.received_txs.contains_key(&msg.from) {
+            self.received_txs.insert(msg.from, HashMap::new());
+        }
+
+        if let Some(txs) = self.received_txs.get_mut(&msg.from) {
+            txs.insert(msg.data.short_id(), msg.data);
         }
     }
 }
@@ -142,24 +238,32 @@ impl Handler<Connect> for Peer {
 
     fn handle(&mut self, msg: Connect, ctx: &mut Context<Self>) {
         // Don't connect to self
-        if msg.0 == self.id {
+        if msg.from_id == self.id {
             return;
         }
 
-        println!("{:?} -> {:?};", msg.0, self.id);
+        // Don't connect if already connected
+        if self.is_connected_to(msg.from_id) {
+            return;
+        }
 
         // Register inbound connection
-        self.inbound.insert(msg.0, ctx.address());
+        self.inbound.insert(msg.from_id, msg.from_addr.clone());
 
         // Connect back
-        let is_private = match msg.0 {
+        let is_private = match msg.from_id {
             PeerId::Private(_) => true,
             _ => false,
         };
 
-        if !is_private && !self.is_connected_to(msg.0) {
-            self.add_outbound_peer(msg.0, ctx.address());
-            ctx.address().do_send(Connect(self.id));
+        println!("{:?} -> {:?};", msg.from_id, self.id);
+
+        if !is_private && !self.is_connected_to(msg.from_id) {
+            self.add_outbound_peer(msg.from_id, msg.from_addr.clone());
+            msg.from_addr.do_send(Connect {
+                from_addr: ctx.address(),
+                from_id: self.id,
+            });
         }
     }
 }

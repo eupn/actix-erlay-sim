@@ -2,7 +2,7 @@
 
 use minisketch_rs;
 use minisketch_rs::Minisketch;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -13,14 +13,14 @@ pub trait ShortId<I> {
 
 /// A set that supports reconciliation by using short IDs (`I`) of its elements (`V`)
 #[derive(Debug)]
-pub struct RecSet<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone> {
+pub struct RecSet<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> {
     capacity: usize,
     seed: Option<u64>,
     sketch: Minisketch,
-    map: HashMap<I, V>,
+    set: HashSet<I>,
 }
 
-impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone> RecSet<I, V> {
+impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> RecSet<I> {
     /// Creates new set with given `capacity`.
     pub fn new(capacity: usize) -> Self {
         let _bits = std::mem::size_of::<I>() * 8;
@@ -30,7 +30,7 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone>
             seed: None,
             capacity,
             sketch,
-            map: HashMap::with_capacity(capacity),
+            set: HashSet::with_capacity(capacity),
         }
     }
 
@@ -42,16 +42,15 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone>
             seed: None,
             capacity,
             sketch,
-            map: HashMap::with_capacity(capacity),
+            set: HashSet::with_capacity(capacity),
         }
     }
 
     /// Adds element to the sketch.
     /// Element will be added only if it's not already in the set.
-    pub fn insert(&mut self, v: V) {
-        let id = v.short_id();
-        if !self.map.contains_key(&id) {
-            self.map.insert(id, v);
+    pub fn insert(&mut self, id: I) {
+        if !self.set.contains(&id) {
+            self.set.insert(id);
             self.sketch.add(id.into());
         }
     }
@@ -139,8 +138,8 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone>
         let a_minus_a_2 = sub_sketches(&a_whole, &a_half, capacity, seed);
         let b_minus_b_2 = sub_sketches(&b_whole, &b_half, capacity, seed);
 
-        let res_1 = RecSet::<I, V>::reconcile(&a_half, &b_half, capacity, seed);
-        let res_2 = RecSet::<I, V>::reconcile(&a_minus_a_2, &b_minus_b_2, capacity, seed);
+        let res_1 = RecSet::<I>::reconcile(&a_half, &b_half, capacity, seed);
+        let res_2 = RecSet::<I>::reconcile(&a_minus_a_2, &b_minus_b_2, capacity, seed);
 
         res_1.and_then(|diffs1| {
             res_2.and_then(|diffs2| {
@@ -163,9 +162,8 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug, V: ShortId<I> + Clone>
         buf
     }
 
-    /// Looks up for an element with given `id` in this set.
-    pub fn get(&self, id: &I) -> Option<V> {
-        self.map.get(id).cloned()
+    pub fn contains(&self, id: &I) -> bool {
+        self.set.contains(id)
     }
 }
 
@@ -192,14 +190,14 @@ mod test {
 
         let txs_bob = vec![Tx([1u8; 32]), Tx([2u8; 32])];
 
-        let mut rec_set_alice = RecSet::<u64, Tx>::with_seed(16, 42u64);
+        let mut rec_set_alice = RecSet::<u64>::with_seed(16, 42u64);
         for tx in txs_alice.iter() {
-            rec_set_alice.insert(tx.clone());
+            rec_set_alice.insert(tx.clone().short_id());
         }
 
-        let mut rec_set_bob = RecSet::<u64, Tx>::with_seed(16, 42u64);
+        let mut rec_set_bob = RecSet::<u64>::with_seed(16, 42u64);
         for tx in txs_bob {
-            rec_set_bob.insert(tx);
+            rec_set_bob.insert(tx.short_id());
         }
 
         let bob_sketch = rec_set_bob.sketch();
@@ -210,7 +208,7 @@ mod test {
         assert_eq!(missing.len(), 2);
 
         for id in missing {
-            assert!(rec_set_alice.get(&id).is_some());
+            assert!(rec_set_alice.contains(&id));
         }
     }
 
@@ -243,12 +241,12 @@ mod test {
         pub fn set_from_range(
             range: impl IntoIterator<Item = u8>,
             capacity: usize,
-        ) -> RecSet<u64, Tx> {
+        ) -> RecSet<u64> {
             let txs = range.into_iter().map(|b| Tx([b; 32]));
 
-            let mut set = RecSet::<u64, Tx>::new(capacity);
+            let mut set = RecSet::<u64>::new(capacity);
             for tx in txs {
-                set.insert(tx);
+                set.insert(tx.short_id());
             }
 
             set
@@ -256,15 +254,15 @@ mod test {
 
         // Try regular reconciliation
 
-        let mut alice_set_full = set_from_range(a, d);
+        let alice_set_full = set_from_range(a, d);
         let a_whole = alice_set_full.sketch();
         let a_half = set_from_range(a_half, d).sketch();
 
-        let mut bob_set_full = set_from_range(b, d);
+        let bob_set_full = set_from_range(b, d);
         let b_whole = bob_set_full.sketch();
         let b_half = set_from_range(b_half, d).sketch();
 
-        let first_try = RecSet::<u64, Tx>::reconcile(&a_whole, &b_whole, d, None);
+        let first_try = RecSet::<u64>::reconcile(&a_whole, &b_whole, d, None);
         if let Err(()) = first_try {
             println!("Set overfull, trying bisect...");
 
@@ -277,7 +275,7 @@ mod test {
             //
             // b_half is known to Alice since Bob sent his b_half sketch to her before bisect
 
-            let res = RecSet::<u64, Tx>::bisect_with(&a_whole, &a_half, &b_whole, &b_half, d, None);
+            let res = RecSet::<u64>::bisect_with(&a_whole, &a_half, &b_whole, &b_half, d, None);
             match res {
                 Ok(diffs) => println!("Success: {} diffs {:?}", diffs.len(), diffs),
                 Err(_) => println!("Bisection failed"),
