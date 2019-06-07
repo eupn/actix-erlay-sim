@@ -4,10 +4,10 @@ mod recset;
 use crate::peer::{Connect, PeerId};
 use actix::prelude::*;
 
-const NUM_PRIVATE_NODES: u32 = 8;
+const NUM_PRIVATE_NODES: u32 = 3;
 const NUM_PUBLIC_NODES: u32 = 8;
 
-pub const RECONCIL_TIMEOUT_SEC: u32 = 1;
+pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
 
 fn main() {
     actix::System::run(|| {

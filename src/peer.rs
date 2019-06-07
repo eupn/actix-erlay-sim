@@ -9,6 +9,7 @@ use std::fmt::{Debug, Error, Formatter};
 use std::time::Duration;
 
 use crate::recset::{RecSet, ShortId};
+use crate::RECONCIL_TIMEOUT_SEC;
 use siphasher::sip::SipHasher;
 use std::hash::Hasher;
 
@@ -29,16 +30,31 @@ pub struct Connect {
     pub from_id: PeerId,
 }
 
-/// Defines possible states of the peer.
-#[derive(Debug, Copy, Clone)]
-pub enum PeerState {
-    Idle,
-}
-
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PeerId {
     Public(u32),
     Private(u32),
+}
+
+#[derive(Debug, Clone, Message)]
+pub struct ReconcileReq {
+    pub from_addr: Addr<Peer>,
+    pub from_id: PeerId,
+    pub sketch: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Message)]
+pub struct ReconcileResult {
+    pub from_addr: Addr<Peer>,
+    pub from_id: PeerId,
+    pub missing: Vec<u64>
+}
+
+#[derive(Debug, Clone, Message)]
+pub struct ReqTx {
+    pub from_addr: Addr<Peer>,
+    pub from_id: PeerId,
+    pub txid: u64,
 }
 
 impl ShortId<u64> for Tx {
@@ -63,8 +79,8 @@ pub struct Peer {
 
     pub received_txs: HashMap<PeerId, HashMap<u64, Tx>>,
 
-    /// Sketches of transactions sets
-    pub sketches: HashMap<PeerId, RecSet<u64>>,
+    /// Set of received transactions
+    pub tx_set: RecSet<u64>,
 
     seed: u64,
 }
@@ -107,7 +123,7 @@ impl Peer {
             inbound: HashMap::new(),
 
             received_txs: Default::default(),
-            sketches: Default::default(),
+            tx_set: RecSet::new(RECONCILIATION_CAPACITY),
             seed: id.into(),
         }
     }
@@ -169,6 +185,19 @@ impl Actor for Peer {
                 println!("From {:?}: {:?}", peer, tx.keys().collect::<Vec<_>>());
             }
         });
+
+        ctx.run_interval(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
+            for (peer_id, peer_addr) in peer.outbound.iter() {
+                let sketch = peer.tx_set.sketch();
+                let msg = ReconcileReq {
+                    from_addr: ctx.address(),
+                    from_id: peer.id,
+                    sketch,
+                };
+
+                peer_addr.do_send(msg);
+            }
+        });
     }
 
     fn stopping(&mut self, _: &mut Self::Context) -> Running {
@@ -210,17 +239,11 @@ impl Handler<PeerTx> for Peer {
             }
 
             self.seed = rng.gen();
-        } else {
-            if !self.sketches.contains_key(&msg.from) {
-                self.sketches.insert(msg.from, RecSet::new(RECONCILIATION_CAPACITY));
-            }
+        }
 
-            if let Some(sketch) = self.sketches.get_mut(&msg.from) {
-                let txid = msg.data.short_id();
-                if !sketch.contains(&txid) {
-                    sketch.insert(txid);
-                }
-            }
+        let txid = msg.data.short_id();
+        if !self.tx_set.contains(&txid) {
+            self.tx_set.insert(txid);
         }
 
         if !self.received_txs.contains_key(&msg.from) {
@@ -268,10 +291,55 @@ impl Handler<Connect> for Peer {
     }
 }
 
-fn hash(bytes: &[u8]) -> Vec<u8> {
-    use sha2::Digest;
+impl Handler<ReconcileReq> for Peer {
+    type Result = ();
 
-    let mut sha = sha2::Sha256::new();
-    sha.input(bytes);
-    sha.result().to_vec()
+    fn handle(&mut self, msg: ReconcileReq, ctx: &mut Self::Context) -> Self::Result {
+        if let Ok(missing) = self.tx_set.reconcile_with(&msg.sketch) {
+            let rec_res = ReconcileResult {
+                from_addr: ctx.address(),
+                from_id: self.id,
+                missing,
+            };
+
+            msg.from_addr.do_send(rec_res);
+        }
+    }
 }
+
+impl Handler<ReconcileResult> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReconcileResult, ctx: &mut Self::Context) -> Self::Result {
+        for txid in msg.missing {
+            let req_tx = ReqTx {
+                from_addr: ctx.address(),
+                from_id: self.id,
+                txid,
+            };
+
+            msg.from_addr.do_send(req_tx);
+        }
+    }
+}
+
+impl Handler<ReqTx> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReqTx, _ctx: &mut Self::Context) -> Self::Result {
+        for txs in self.received_txs.values() {
+            for (txid, current_tx) in txs {
+                if msg.txid == *txid {
+                    let tx_msg = PeerTx {
+                        from: self.id,
+                        data: *current_tx
+                    };
+
+                    msg.from_addr.do_send(tx_msg);
+                    return;
+                }
+            }
+        }
+    }
+}
+

@@ -165,6 +165,10 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> RecSet<I> {
     pub fn contains(&self, id: &I) -> bool {
         self.set.contains(id)
     }
+
+    pub fn len(&self) -> usize {
+        self.set.len()
+    }
 }
 
 #[cfg(test)]
