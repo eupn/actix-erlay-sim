@@ -4,7 +4,7 @@ This is an [Actix]-based simulator for evaluation of [Erlay] transaction propaga
 
 It includes:
 
-* `Peer` actor that can be either **publi** or **Private**
+* `Peer` actor that can be either **public** or **private**
 * `RecSet` -- a set with reconciliation using [minisketch-rs]
 * `TrafficCounter` actor that reads reports on used traffic from peers
 * Various protocol messages for connection, tx propagation and set reconciliation
