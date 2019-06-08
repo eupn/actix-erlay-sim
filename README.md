@@ -1,0 +1,80 @@
+## Actix-based Erlay simulator
+
+This is an [Actix]-based simulator for evaluation of [Erlay] transaction propagation technique.
+
+It includes:
+
+* `Peer` actor that can be either **publi** or **Private**
+* `RecSet` -- a set with reconciliation using [minisketch-rs]
+* `TrafficCounter` actor that reads reports on used traffic from peers
+* Various protocol messages for connection, tx propagation and set reconciliation
+
+It creates a network of public and private peers. Every private peer creates a single transaction of 1024 bytes.
+
+Short IDs of the transactions are based on [SipHasher24] and are 64-bit wide.
+
+### Example
+
+Let's create a simple network and simulate both [Erlay] and flooding transaction propagation strategies.
+
+#### Flooding
+
+Run simulator with following parameters:
+
+```bash
+cargo run -- --numprivate=8 --numpublic=2
+```
+
+It will produce following network of peers:
+
+![](assets/peers.png)
+
+* Two (2) **public** peers that do have inbound connections
+* Eight (8) **private** peers that don't have inbound connections
+
+Simple transaction flooding will produce `429488` bytes of traffic.
+
+Traffic per peer:
+```
+pub0: 72248 ↑ 31040 ↓ (bytes)
+pub1: 68120 ↑ 59936 ↓ (bytes)
+priv0: 9288 ↑ 15480 ↓ (bytes)
+priv1: 9288 ↑ 15480 ↓ (bytes)
+priv2: 9288 ↑ 15480 ↓ (bytes)
+priv3: 9288 ↑ 15480 ↓ (bytes)
+priv4: 9288 ↑ 15480 ↓ (bytes)
+priv5: 9288 ↑ 15480 ↓ (bytes)
+priv6: 9288 ↑ 15480 ↓ (bytes)
+priv7: 9288 ↑ 15480 ↓ (bytes)
+```
+
+#### [Erlay] (low-fanout flooding + set reconciliation)
+
+Now we enable [Erlay] which is using set reconciliation (`-r` flag) instead of flooding for tx propagation:
+
+```bash
+cargo run -- --numprivate=8 --numpublic=2 --r
+```
+
+In this case, overall traffic will be `201200` bytes.
+
+Traffic per peer:
+```
+pub0: 43688 ↑ 23320 ↓ (bytes)
+pub1: 31256 ↑ 24184 ↓ (bytes)
+priv0: 3176 ↑ 5216 ↓ (bytes)
+priv1: 3160 ↑ 4176 ↓ (bytes)
+priv2: 3144 ↑ 3136 ↓ (bytes)
+priv3: 3128 ↑ 2096 ↓ (bytes)
+priv4: 3112 ↑ 1056 ↓ (bytes)
+priv5: 3304 ↑ 13536 ↓ (bytes)
+priv6: 3288 ↑ 12496 ↓ (bytes)
+priv7: 3272 ↑ 11456 ↓ (bytes)
+```
+
+As we can see, [Erlay] benefits us with `201200.0 / 429488.0 * 100 = 46.8`% bandwidth reduction, mostly for private nodes.
+
+[SipHasher24]: https://docs.rs/siphasher/0.3.0/siphasher/sip/struct.SipHasher24.html
+[Actix]: https://github.com/actix/actix
+[Erlay]: https://arxiv.org/pdf/1905.10518.pdf
+[minisketch-rs]: https://github.com/eupn/minisketch-rs
