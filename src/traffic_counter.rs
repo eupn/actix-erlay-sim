@@ -1,6 +1,6 @@
-use actix::prelude::*;
 use crate::messages::TrafficReport;
 use crate::peer::PeerId;
+use actix::prelude::*;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -11,13 +11,13 @@ pub struct TrafficData {
 }
 
 pub struct TrafficCounter {
-    pub traffic: HashMap<PeerId, TrafficData>
+    pub traffic: HashMap<PeerId, TrafficData>,
 }
 
 impl TrafficCounter {
     pub fn new() -> Self {
         TrafficCounter {
-            traffic: Default::default()
+            traffic: Default::default(),
         }
     }
 }
@@ -27,7 +27,8 @@ impl Actor for TrafficCounter {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         ctx.run_later(Duration::from_secs(6), |act, _| {
-            let total_traffic = act.traffic
+            let total_traffic = act
+                .traffic
                 .values()
                 .fold(0, |v, next| v + (next.bytes_sent + next.bytes_received));
 

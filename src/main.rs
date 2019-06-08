@@ -8,13 +8,16 @@ use crate::peer::PeerId;
 
 use actix::prelude::*;
 
-use structopt::*;
 use crate::traffic_counter::TrafficCounter;
+use structopt::*;
 
 pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "simulator", about = "An Erlay transaction propagation technique simulator")]
+#[structopt(
+    name = "simulator",
+    about = "An Erlay transaction propagation technique simulator"
+)]
 struct SimulatorParameters {
     /// Use reconciliation (Erlay)
     #[structopt(short = "r", long = "reconciliation")]
@@ -45,7 +48,8 @@ fn main() {
         let mut private_nodes = vec![];
         for id in 0u32..parameters.num_private_nodes {
             let peer_id = PeerId::Private(id);
-            let mut peer = peer::Peer::new(peer_id, parameters.use_reconciliation, tcounter.clone());
+            let mut peer =
+                peer::Peer::new(peer_id, parameters.use_reconciliation, tcounter.clone());
             for (id, pub_peer) in public_nodes.iter() {
                 peer.add_outbound_peer(*id, pub_peer.clone());
             }

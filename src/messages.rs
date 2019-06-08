@@ -52,7 +52,7 @@ pub struct TxRequest {
 pub struct TrafficReport {
     pub from_id: PeerId,
     pub bytes_sent: u64,
-    pub bytes_received: u64
+    pub bytes_received: u64,
 }
 
 pub trait Traffic {
