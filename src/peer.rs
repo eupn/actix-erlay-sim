@@ -16,7 +16,7 @@ use crate::messages::{
 };
 use crate::traffic_counter::TrafficCounter;
 
-const RECONCILIATION_CAPACITY: usize = 128;
+const RECONCILIATION_CAPACITY: usize = 200;
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PeerId {
@@ -124,7 +124,7 @@ impl Actor for Peer {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(1), |act, _| {
+        ctx.run_later(Duration::from_secs(0), |act, _| {
             if !act.is_public() {
                 let mut tx_data = [0u8; 1024];
                 let mut seed = [0u8; 16];
@@ -148,7 +148,7 @@ impl Actor for Peer {
             }
         });
 
-        ctx.run_later(Duration::from_secs(3), |peer, _ct| {
+        ctx.run_later(Duration::from_secs(30), |peer, _ct| {
             /*println!(
                 "Peer {:?} outbound connections: {:?}",
                 peer.id,
@@ -166,7 +166,7 @@ impl Actor for Peer {
                 .map(|tx| tx.short_id())
                 .collect::<Vec<_>>();
             txs.sort();
-            println!("Peer {:?} txs: {:?}", peer.id, txs);
+            //println!("Peer {:?} {} txs", peer.id, txs.len());
             let traffic_msg = TrafficReport {
                 from_id: peer.id,
                 bytes_sent: peer.bytes_sent,
@@ -307,7 +307,7 @@ impl Handler<Connect> for Peer {
             _ => false,
         };
 
-        println!("{:?} -> {:?};", msg.from_id, self.id);
+        //println!("{:?} -> {:?};", msg.from_id, self.id);
 
         if !is_private && !self.is_connected_to(msg.from_id) {
             self.add_outbound_peer(msg.from_id, msg.from_addr.clone());

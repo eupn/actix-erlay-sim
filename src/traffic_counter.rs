@@ -3,6 +3,7 @@ use crate::peer::PeerId;
 use actix::prelude::*;
 use std::collections::HashMap;
 use std::time::Duration;
+use std::process;
 
 #[derive(Debug, Clone, Default)]
 pub struct TrafficData {
@@ -26,14 +27,15 @@ impl Actor for TrafficCounter {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(4), |act, _| {
+        ctx.run_later(Duration::from_secs(31), |act, _| {
             let total_traffic = act
                 .traffic
                 .values()
                 .fold(0, |v, next| v + (next.bytes_sent + next.bytes_received));
 
-            println!("Total traffic: {} bytes", total_traffic);
+            println!("{}", total_traffic);
 
+            /*
             println!("Traffic per peer:");
             let mut traffic = act.traffic.iter().collect::<Vec<_>>();
             traffic.sort_by_key(|(id, _)| Into::<u64>::into(**id));
@@ -43,7 +45,9 @@ impl Actor for TrafficCounter {
                     "{:?}: {} ↑ {} ↓ (bytes)",
                     id, traffic.bytes_sent, traffic.bytes_received
                 );
-            }
+            }*/
+
+            process::exit(0);
         });
     }
 }
