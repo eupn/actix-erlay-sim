@@ -245,10 +245,7 @@ mod test {
             .collect::<Vec<_>>();
 
         // Creates a_whole set from a_whole range of elements
-        pub fn set_from_range(
-            range: impl IntoIterator<Item = u8>,
-            capacity: usize,
-        ) -> RecSet<u64> {
+        pub fn set_from_range(range: impl IntoIterator<Item = u8>, capacity: usize) -> RecSet<u64> {
             let txs = range.into_iter().map(|b| Tx([b; 32]));
 
             let mut set = RecSet::<u64>::new(capacity);

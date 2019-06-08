@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::recset::{RecSet, ShortId};
 use crate::RECONCIL_TIMEOUT_SEC;
 
-use crate::messages::{Connect, PeerTx, ReconcileRequest, ReconcileResult, TxRequest, Tx};
+use crate::messages::{Connect, PeerTx, ReconcileRequest, ReconcileResult, Tx, TxRequest};
 
 const RECONCILIATION_CAPACITY: usize = 128;
 
@@ -114,7 +114,7 @@ impl Actor for Peer {
                 if let Some(addr) = act.outbound.values().collect::<Vec<_>>().first() {
                     addr.do_send(PeerTx {
                         from: act.id,
-                        data: tx
+                        data: tx,
                     });
                 }
 
@@ -133,10 +133,7 @@ impl Actor for Peer {
                 peer.id,
                 peer.inbound.keys().collect::<Vec<_>>()
             );
-            println!(
-                "Peer {:?} txs:",
-                peer.id,
-            );
+            println!("Peer {:?} txs:", peer.id,);
             for (peer, tx) in peer.received_txs.iter() {
                 println!("From {:?}: {:?}", peer, tx.keys().collect::<Vec<_>>());
             }
@@ -168,7 +165,7 @@ impl Handler<PeerTx> for Peer {
         // Don't relay nor save already processed transaction
         for set in self.received_txs.values() {
             if set.contains_key(&msg.data.short_id()) {
-                return
+                return;
             }
         }
 
@@ -288,7 +285,7 @@ impl Handler<TxRequest> for Peer {
                 if msg.txid == *txid {
                     let tx_msg = PeerTx {
                         from: self.id,
-                        data: *current_tx
+                        data: *current_tx,
                     };
 
                     msg.from_addr.do_send(tx_msg);
@@ -298,4 +295,3 @@ impl Handler<TxRequest> for Peer {
         }
     }
 }
-

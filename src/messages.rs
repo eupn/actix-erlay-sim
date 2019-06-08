@@ -1,6 +1,6 @@
-use actix::prelude::*;
 use crate::peer::{Peer, PeerId};
 use crate::recset::ShortId;
+use actix::prelude::*;
 use siphasher::sip::SipHasher;
 use std::hash::Hasher;
 
@@ -38,7 +38,7 @@ pub struct ReconcileRequest {
 pub struct ReconcileResult {
     pub from_addr: Addr<Peer>,
     pub from_id: PeerId,
-    pub missing: Vec<u64>
+    pub missing: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Message)]

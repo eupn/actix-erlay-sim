@@ -1,9 +1,9 @@
+mod messages;
 mod peer;
 mod recset;
-mod messages;
 
-use crate::peer::PeerId;
 use crate::messages::Connect;
+use crate::peer::PeerId;
 
 use actix::prelude::*;
 
@@ -49,7 +49,7 @@ fn main() {
             for (_other_id, other_public_peer) in public_nodes.iter() {
                 other_public_peer.do_send(Connect {
                     from_addr: private_peer.clone(),
-                    from_id: this_id.clone()
+                    from_id: this_id.clone(),
                 });
             }
         }
