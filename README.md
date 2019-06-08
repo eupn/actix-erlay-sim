@@ -9,7 +9,8 @@ It includes:
 * `TrafficCounter` actor that reads reports on used traffic from peers
 * Various protocol messages for connection, tx propagation and set reconciliation
 
-It creates a network of public and private peers. Every private peer creates a single transaction of 1024 bytes.
+It creates a network of public and private peers. 
+Each private peer announces a single transaction of 1024 bytes to a single random outbound peer.
 
 Short IDs of the transactions are based on [SipHasher24] and are 64-bit wide.
 
@@ -36,8 +37,9 @@ Simple transaction flooding will produce `429488` bytes of traffic.
 
 Traffic per peer:
 ```
-pub0: 72248 ↑ 31040 ↓ (bytes)
-pub1: 68120 ↑ 59936 ↓ (bytes)
+Traffic per peer:
+pub0: 73280 ↑ 23816 ↓ (bytes)
+pub1: 67088 ↑ 67160 ↓ (bytes)
 priv0: 9288 ↑ 15480 ↓ (bytes)
 priv1: 9288 ↑ 15480 ↓ (bytes)
 priv2: 9288 ↑ 15480 ↓ (bytes)
@@ -46,6 +48,7 @@ priv4: 9288 ↑ 15480 ↓ (bytes)
 priv5: 9288 ↑ 15480 ↓ (bytes)
 priv6: 9288 ↑ 15480 ↓ (bytes)
 priv7: 9288 ↑ 15480 ↓ (bytes)
+
 ```
 
 #### [Erlay] (low-fanout flooding + set reconciliation)
@@ -56,23 +59,24 @@ Now we enable [Erlay] which is using set reconciliation (`-r` flag) instead of f
 cargo run -- --numprivate=8 --numpublic=2 --r
 ```
 
-In this case, overall traffic will be `201200` bytes.
+In this case, overall traffic will be `357488` bytes.
 
 Traffic per peer:
 ```
-pub0: 43688 ↑ 23320 ↓ (bytes)
-pub1: 31256 ↑ 24184 ↓ (bytes)
-priv0: 3176 ↑ 5216 ↓ (bytes)
-priv1: 3160 ↑ 4176 ↓ (bytes)
-priv2: 3144 ↑ 3136 ↓ (bytes)
-priv3: 3128 ↑ 2096 ↓ (bytes)
-priv4: 3112 ↑ 1056 ↓ (bytes)
-priv5: 3304 ↑ 13536 ↓ (bytes)
-priv6: 3288 ↑ 12496 ↓ (bytes)
-priv7: 3272 ↑ 11456 ↓ (bytes)
+Traffic per peer:
+pub0: 75928 ↑ 21752 ↓ (bytes)
+pub1: 75928 ↑ 23816 ↓ (bytes)
+priv0: 3352 ↑ 16656 ↓ (bytes)
+priv1: 3352 ↑ 16656 ↓ (bytes)
+priv2: 3352 ↑ 16656 ↓ (bytes)
+priv3: 3352 ↑ 16656 ↓ (bytes)
+priv4: 3352 ↑ 16656 ↓ (bytes)
+priv5: 3352 ↑ 16656 ↓ (bytes)
+priv6: 3352 ↑ 16656 ↓ (bytes)
+priv7: 3352 ↑ 16656 ↓ (bytes)
 ```
 
-As we can see, [Erlay] benefits us with `201200.0 / 429488.0 * 100 = 46.8`% bandwidth reduction, mostly for private nodes.
+As we can see, [Erlay] benefits us with `100 - 357488.0 / 429488.0 * 100 = 16.8`% bandwidth reduction, mostly for private nodes.
 
 [SipHasher24]: https://docs.rs/siphasher/0.3.0/siphasher/sip/struct.SipHasher24.html
 [Actix]: https://github.com/actix/actix

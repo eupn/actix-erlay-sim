@@ -26,7 +26,7 @@ impl Actor for TrafficCounter {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(3), |act, _| {
+        ctx.run_later(Duration::from_secs(4), |act, _| {
             let total_traffic = act
                 .traffic
                 .values()
@@ -39,7 +39,10 @@ impl Actor for TrafficCounter {
             traffic.sort_by_key(|(id, _)| Into::<u64>::into(**id));
 
             for (id, traffic) in traffic {
-                println!("{:?}: {} ↑ {} ↓ (bytes)", id, traffic.bytes_sent, traffic.bytes_received);
+                println!(
+                    "{:?}: {} ↑ {} ↓ (bytes)",
+                    id, traffic.bytes_sent, traffic.bytes_received
+                );
             }
         });
     }

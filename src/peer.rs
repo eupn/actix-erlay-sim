@@ -88,6 +88,7 @@ impl Peer {
         id: PeerId,
         use_reconciliation: bool,
         traffic_counter_addr: Addr<TrafficCounter>,
+        seed: Option<u64>,
     ) -> Self {
         Peer {
             id,
@@ -97,7 +98,7 @@ impl Peer {
             mempool: Default::default(),
             received_txs: Default::default(),
             reconciliation_set: RecSet::new(RECONCILIATION_CAPACITY),
-            seed: id.into(),
+            seed: seed.unwrap_or(0u64) + Into::<u64>::into(id),
             bytes_sent: 0,
             bytes_received: 0,
             traffic_counter_addr,
@@ -132,6 +133,7 @@ impl Actor for Peer {
                 rng.fill(&mut tx_data);
                 let tx = Tx(tx_data);
 
+                // Announce a transaction to a single random outbound peer
                 if let Some(addr) = act.outbound.values().collect::<Vec<_>>().first() {
                     let peer_tx = PeerTx {
                         from: act.id,
@@ -146,7 +148,7 @@ impl Actor for Peer {
             }
         });
 
-        ctx.run_later(Duration::from_secs(2), |peer, _ct| {
+        ctx.run_later(Duration::from_secs(3), |peer, _ct| {
             /*println!(
                 "Peer {:?} outbound connections: {:?}",
                 peer.id,
@@ -164,7 +166,7 @@ impl Actor for Peer {
                 .map(|tx| tx.short_id())
                 .collect::<Vec<_>>();
             txs.sort();
-            //println!("Peer {:?} txs: {:?}", peer.id, txs);
+            println!("Peer {:?} txs: {:?}", peer.id, txs);
             let traffic_msg = TrafficReport {
                 from_id: peer.id,
                 bytes_sent: peer.bytes_sent,
