@@ -48,36 +48,43 @@ pub struct TxRequest {
     pub txid: u64,
 }
 
+#[derive(Debug, Clone, Message)]
+pub struct TrafficReport {
+    pub from_id: PeerId,
+    pub bytes_sent: u64,
+    pub bytes_received: u64
+}
+
 pub trait Traffic {
-    fn size_bytes(&self) -> usize;
+    fn size_bytes(&self) -> u64;
 }
 
 impl Traffic for PeerTx {
-    fn size_bytes(&self) -> usize {
-        std::mem::size_of::<Tx>() + std::mem::size_of::<PeerId>()
+    fn size_bytes(&self) -> u64 {
+        (std::mem::size_of::<Tx>() + std::mem::size_of::<PeerId>()) as u64
     }
 }
 
 impl Traffic for Connect {
-    fn size_bytes(&self) -> usize {
-        std::mem::size_of::<PeerId>()
+    fn size_bytes(&self) -> u64 {
+        std::mem::size_of::<PeerId>() as u64
     }
 }
 
 impl Traffic for ReconcileRequest {
-    fn size_bytes(&self) -> usize {
-        std::mem::size_of::<PeerId>() + self.sketch.len()
+    fn size_bytes(&self) -> u64 {
+        (std::mem::size_of::<PeerId>() + self.sketch.len()) as u64
     }
 }
 
 impl Traffic for ReconcileResult {
-    fn size_bytes(&self) -> usize {
-        std::mem::size_of::<PeerId>() + self.missing.len() * std::mem::size_of::<u64>()
+    fn size_bytes(&self) -> u64 {
+        (std::mem::size_of::<PeerId>() + self.missing.len() * std::mem::size_of::<u64>()) as u64
     }
 }
 
 impl Traffic for TxRequest {
-    fn size_bytes(&self) -> usize {
-        std::mem::size_of::<PeerId>() + std::mem::size_of::<u64>()
+    fn size_bytes(&self) -> u64 {
+        (std::mem::size_of::<PeerId>() + std::mem::size_of::<u64>()) as u64
     }
 }

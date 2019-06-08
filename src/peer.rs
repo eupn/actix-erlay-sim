@@ -11,7 +11,8 @@ use std::time::Duration;
 use crate::recset::{RecSet, ShortId};
 use crate::RECONCIL_TIMEOUT_SEC;
 
-use crate::messages::{Traffic, Connect, PeerTx, ReconcileRequest, ReconcileResult, Tx, TxRequest};
+use crate::messages::{Traffic, Connect, PeerTx, ReconcileRequest, ReconcileResult, Tx, TxRequest, TrafficReport};
+use crate::traffic_counter::TrafficCounter;
 
 const RECONCILIATION_CAPACITY: usize = 128;
 
@@ -43,8 +44,9 @@ pub struct Peer {
 
     seed: u64,
 
-    bytes_sent: usize,
-    bytes_received: usize,
+    bytes_sent: u64,
+    bytes_received: u64,
+    traffic_counter_addr: Addr<TrafficCounter>,
 
     use_reconciliation: bool,
 }
@@ -80,7 +82,7 @@ impl Into<u64> for PeerId {
 }
 
 impl Peer {
-    pub fn new(id: PeerId, use_reconciliation: bool) -> Self {
+    pub fn new(id: PeerId, use_reconciliation: bool, traffic_counter_addr: Addr<TrafficCounter>) -> Self {
         Peer {
             id,
             outbound: HashMap::new(),
@@ -92,6 +94,7 @@ impl Peer {
             seed: id.into(),
             bytes_sent: 0,
             bytes_received: 0,
+            traffic_counter_addr,
             use_reconciliation,
         }
     }
@@ -151,8 +154,14 @@ impl Actor for Peer {
 
             let mut txs = peer.mempool.values().map(|tx| tx.short_id()).collect::<Vec<_>>();
             txs.sort();
-            println!("Peer {:?} txs: {:?}", peer.id, txs);
-            println!("Peer {:?} traffic: {} bytes", peer.id, peer.bytes_received + peer.bytes_sent);
+            //println!("Peer {:?} txs: {:?}", peer.id, txs);
+            let traffic_msg = TrafficReport {
+                from_id: peer.id,
+                bytes_sent: peer.bytes_sent,
+                bytes_received: peer.bytes_received
+            };
+
+            peer.traffic_counter_addr.do_send(traffic_msg);
         });
 
         if self.use_reconciliation {
