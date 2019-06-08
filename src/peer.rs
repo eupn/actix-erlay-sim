@@ -33,10 +33,14 @@ pub struct Peer {
     /// Inbound connections
     pub inbound: HashMap<PeerId, Addr<Peer>>,
 
-    pub received_txs: HashMap<PeerId, HashMap<u64, Tx>>,
+    /// Holds a mempool, set of transactions by txid
+    pub mempool: HashMap<u64, Tx>,
 
-    /// Set of received transactions
-    pub tx_set: RecSet<u64>,
+    /// Holds set of received transactions ID from an individual peer.
+    pub received_txs: HashMap<PeerId, Vec<u64>>,
+
+    /// Set of transactions for reconciliation with any peer
+    pub reconciliation_set: RecSet<u64>,
 
     seed: u64,
 }
@@ -78,8 +82,9 @@ impl Peer {
             outbound: HashMap::new(),
             inbound: HashMap::new(),
 
+            mempool: Default::default(),
             received_txs: Default::default(),
-            tx_set: RecSet::new(RECONCILIATION_CAPACITY),
+            reconciliation_set: RecSet::new(RECONCILIATION_CAPACITY),
             seed: id.into(),
         }
     }
@@ -133,15 +138,15 @@ impl Actor for Peer {
                 peer.id,
                 peer.inbound.keys().collect::<Vec<_>>()
             );
-            println!("Peer {:?} txs:", peer.id,);
-            for (peer, tx) in peer.received_txs.iter() {
-                println!("From {:?}: {:?}", peer, tx.keys().collect::<Vec<_>>());
-            }
+
+            let mut txs = peer.mempool.values().map(|tx| tx.short_id()).collect::<Vec<_>>();
+            txs.sort();
+            println!("Peer {:?} txs: {:?}", peer.id, txs);
         });
 
         ctx.run_interval(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
             for (_, peer_addr) in peer.outbound.iter() {
-                let sketch = peer.tx_set.sketch();
+                let sketch = peer.reconciliation_set.sketch();
                 let msg = ReconcileRequest {
                     from_addr: ctx.address(),
                     from_id: peer.id,
@@ -162,14 +167,28 @@ impl Handler<PeerTx> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: PeerTx, _ctx: &mut Context<Self>) {
+        let txid = msg.data.short_id();
+
         // Don't relay nor save already processed transaction
-        for set in self.received_txs.values() {
-            if set.contains_key(&msg.data.short_id()) {
-                return;
-            }
+        if self.mempool.contains_key(&txid) {
+            return;
         }
 
-        // Perform low-fanout flooding if it is a public node
+        if !self.reconciliation_set.contains(&txid) {
+            self.reconciliation_set.insert(txid);
+        }
+
+        self.mempool.insert(txid, msg.data);
+
+        if !self.received_txs.contains_key(&msg.from) {
+            self.received_txs.insert(msg.from, vec![]);
+        }
+
+        if let Some(txs) = self.received_txs.get_mut(&msg.from) {
+            txs.push(txid);
+        }
+
+        // Perform low-fanout flooding if it's a public node
         if self.is_public() {
             let mut seed = [0u8; 16];
             LittleEndian::write_u64(&mut seed, self.seed);
@@ -192,19 +211,6 @@ impl Handler<PeerTx> for Peer {
             }
 
             self.seed = rng.gen();
-        }
-
-        let txid = msg.data.short_id();
-        if !self.tx_set.contains(&txid) {
-            self.tx_set.insert(txid);
-        }
-
-        if !self.received_txs.contains_key(&msg.from) {
-            self.received_txs.insert(msg.from, HashMap::new());
-        }
-
-        if let Some(txs) = self.received_txs.get_mut(&msg.from) {
-            txs.insert(msg.data.short_id(), msg.data);
         }
     }
 }
@@ -248,7 +254,7 @@ impl Handler<ReconcileRequest> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: ReconcileRequest, ctx: &mut Self::Context) -> Self::Result {
-        if let Ok(missing) = self.tx_set.reconcile_with(&msg.sketch) {
+        if let Ok(missing) = self.reconciliation_set.reconcile_with(&msg.sketch) {
             let rec_res = ReconcileResult {
                 from_addr: ctx.address(),
                 from_id: self.id,
@@ -280,18 +286,14 @@ impl Handler<TxRequest> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: TxRequest, _ctx: &mut Self::Context) -> Self::Result {
-        for txs in self.received_txs.values() {
-            for (txid, current_tx) in txs {
-                if msg.txid == *txid {
-                    let tx_msg = PeerTx {
-                        from: self.id,
-                        data: *current_tx,
-                    };
+        if let Some(tx) = self.mempool.get(&msg.txid) {
+            let tx_msg = PeerTx {
+                from: self.id,
+                data: *tx,
+            };
 
-                    msg.from_addr.do_send(tx_msg);
-                    return;
-                }
-            }
+            msg.from_addr.do_send(tx_msg);
+            return;
         }
     }
 }

@@ -7,8 +7,8 @@ use crate::peer::PeerId;
 
 use actix::prelude::*;
 
-const NUM_PRIVATE_NODES: u32 = 3;
-const NUM_PUBLIC_NODES: u32 = 8;
+const NUM_PRIVATE_NODES: u32 = 8;
+const NUM_PUBLIC_NODES: u32 = 2;
 
 pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
 
