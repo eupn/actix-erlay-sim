@@ -37,7 +37,6 @@ Simple transaction flooding will produce `429488` bytes of traffic.
 
 Traffic per peer:
 ```
-Traffic per peer:
 pub0: 73280 ↑ 23816 ↓ (bytes)
 pub1: 67088 ↑ 67160 ↓ (bytes)
 priv0: 9288 ↑ 15480 ↓ (bytes)
@@ -63,7 +62,6 @@ In this case, overall traffic will be `357488` bytes.
 
 Traffic per peer:
 ```
-Traffic per peer:
 pub0: 75928 ↑ 21752 ↓ (bytes)
 pub1: 75928 ↑ 23816 ↓ (bytes)
 priv0: 3352 ↑ 16656 ↓ (bytes)
