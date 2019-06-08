@@ -35,6 +35,7 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> RecSet<I> {
     }
 
     /// Creates new set with given `capacity` and `seed` for underlying Minisketch math.
+    #[allow(dead_code)]
     pub fn with_seed(capacity: usize, seed: u64) -> Self {
         let sketch = Self::create_minisketch(capacity, Some(seed));
 
@@ -96,6 +97,7 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> RecSet<I> {
         Self::reconcile(&self.sketch(), sketch_b, self.capacity, self.seed)
     }
 
+    #[allow(dead_code)]
     pub fn bisect_with(
         a_whole: &[u8],
         a_half: &[u8],
@@ -166,6 +168,7 @@ impl<I: Hash + Eq + Copy + From<u64> + Into<u64> + Debug> RecSet<I> {
         self.set.contains(id)
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.set.len()
     }

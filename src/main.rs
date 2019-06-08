@@ -1,7 +1,10 @@
 mod peer;
 mod recset;
+mod messages;
 
-use crate::peer::{Connect, PeerId};
+use crate::peer::PeerId;
+use crate::messages::Connect;
+
 use actix::prelude::*;
 
 const NUM_PRIVATE_NODES: u32 = 3;

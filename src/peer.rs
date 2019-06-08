@@ -10,59 +10,15 @@ use std::time::Duration;
 
 use crate::recset::{RecSet, ShortId};
 use crate::RECONCIL_TIMEOUT_SEC;
-use siphasher::sip::SipHasher;
-use std::hash::Hasher;
+
+use crate::messages::{Connect, PeerTx, ReconcileRequest, ReconcileResult, TxRequest, Tx};
 
 const RECONCILIATION_CAPACITY: usize = 128;
-
-#[derive(Debug, Copy, Clone)]
-pub struct Tx(pub [u8; 32]);
-
-#[derive(Debug, Copy, Clone, Message)]
-pub struct PeerTx {
-    pub from: PeerId,
-    pub data: Tx,
-}
-
-#[derive(Debug, Clone, Message)]
-pub struct Connect {
-    pub from_addr: Addr<Peer>,
-    pub from_id: PeerId,
-}
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PeerId {
     Public(u32),
     Private(u32),
-}
-
-#[derive(Debug, Clone, Message)]
-pub struct ReconcileReq {
-    pub from_addr: Addr<Peer>,
-    pub from_id: PeerId,
-    pub sketch: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Message)]
-pub struct ReconcileResult {
-    pub from_addr: Addr<Peer>,
-    pub from_id: PeerId,
-    pub missing: Vec<u64>
-}
-
-#[derive(Debug, Clone, Message)]
-pub struct ReqTx {
-    pub from_addr: Addr<Peer>,
-    pub from_id: PeerId,
-    pub txid: u64,
-}
-
-impl ShortId<u64> for Tx {
-    fn short_id(&self) -> u64 {
-        let mut hasher = SipHasher::new_with_keys(0xDEu64, 0xADu64);
-        hasher.write(&self.0);
-        hasher.finish()
-    }
 }
 
 /// Describes single independent peer in the network.
@@ -187,9 +143,9 @@ impl Actor for Peer {
         });
 
         ctx.run_interval(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
-            for (peer_id, peer_addr) in peer.outbound.iter() {
+            for (_, peer_addr) in peer.outbound.iter() {
                 let sketch = peer.tx_set.sketch();
-                let msg = ReconcileReq {
+                let msg = ReconcileRequest {
                     from_addr: ctx.address(),
                     from_id: peer.id,
                     sketch,
@@ -291,10 +247,10 @@ impl Handler<Connect> for Peer {
     }
 }
 
-impl Handler<ReconcileReq> for Peer {
+impl Handler<ReconcileRequest> for Peer {
     type Result = ();
 
-    fn handle(&mut self, msg: ReconcileReq, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: ReconcileRequest, ctx: &mut Self::Context) -> Self::Result {
         if let Ok(missing) = self.tx_set.reconcile_with(&msg.sketch) {
             let rec_res = ReconcileResult {
                 from_addr: ctx.address(),
@@ -312,7 +268,7 @@ impl Handler<ReconcileResult> for Peer {
 
     fn handle(&mut self, msg: ReconcileResult, ctx: &mut Self::Context) -> Self::Result {
         for txid in msg.missing {
-            let req_tx = ReqTx {
+            let req_tx = TxRequest {
                 from_addr: ctx.address(),
                 from_id: self.id,
                 txid,
@@ -323,10 +279,10 @@ impl Handler<ReconcileResult> for Peer {
     }
 }
 
-impl Handler<ReqTx> for Peer {
+impl Handler<TxRequest> for Peer {
     type Result = ();
 
-    fn handle(&mut self, msg: ReqTx, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: TxRequest, _ctx: &mut Self::Context) -> Self::Result {
         for txs in self.received_txs.values() {
             for (txid, current_tx) in txs {
                 if msg.txid == *txid {
