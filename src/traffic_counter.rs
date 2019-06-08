@@ -26,13 +26,21 @@ impl Actor for TrafficCounter {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(6), |act, _| {
+        ctx.run_later(Duration::from_secs(3), |act, _| {
             let total_traffic = act
                 .traffic
                 .values()
                 .fold(0, |v, next| v + (next.bytes_sent + next.bytes_received));
 
             println!("Total traffic: {} bytes", total_traffic);
+
+            println!("Traffic per peer:");
+            let mut traffic = act.traffic.iter().collect::<Vec<_>>();
+            traffic.sort_by_key(|(id, _)| Into::<u64>::into(**id));
+
+            for (id, traffic) in traffic {
+                println!("{:?}: {} ↑ {} ↓ (bytes)", id, traffic.bytes_sent, traffic.bytes_received);
+            }
         });
     }
 }

@@ -11,7 +11,7 @@ use actix::prelude::*;
 use crate::traffic_counter::TrafficCounter;
 use structopt::*;
 
-pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
+pub const RECONCIL_TIMEOUT_SEC: u64 = 1;
 
 #[derive(Debug, StructOpt)]
 #[structopt(

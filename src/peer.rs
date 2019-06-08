@@ -146,7 +146,7 @@ impl Actor for Peer {
             }
         });
 
-        ctx.run_later(Duration::from_secs(5), |peer, _ct| {
+        ctx.run_later(Duration::from_secs(2), |peer, _ct| {
             /*println!(
                 "Peer {:?} outbound connections: {:?}",
                 peer.id,
@@ -176,17 +176,29 @@ impl Actor for Peer {
 
         if self.use_reconciliation {
             ctx.run_later(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
-                for (_, peer_addr) in peer.outbound.iter() {
-                    let sketch = peer.reconciliation_set.sketch();
-                    let msg = ReconcileRequest {
-                        from_addr: ctx.address(),
-                        from_id: peer.id,
-                        sketch,
-                    };
+                // Shuffle outbound peers and send reconciliation requests
+                let mut seed = [0u8; 16];
+                LittleEndian::write_u64(&mut seed, peer.seed);
+                let mut rng = XorShiftRng::from_seed(seed);
+                let peers = peer.outbound.clone();
+                {
+                    let mut peers = peers.iter().collect::<Vec<_>>();
+                    peers.shuffle(&mut rng);
 
-                    peer.bytes_sent += msg.size_bytes();
-                    peer_addr.do_send(msg);
+                    for (_, peer_addr) in peers {
+                        let sketch = peer.reconciliation_set.sketch();
+                        let msg = ReconcileRequest {
+                            from_addr: ctx.address(),
+                            from_id: peer.id,
+                            sketch,
+                        };
+
+                        peer.bytes_sent += msg.size_bytes();
+                        peer_addr.do_send(msg);
+                    }
                 }
+
+                peer.seed = rng.gen();
             });
         }
     }
