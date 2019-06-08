@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::recset::{RecSet, ShortId};
 use crate::RECONCIL_TIMEOUT_SEC;
 
-use crate::messages::{Connect, PeerTx, ReconcileRequest, ReconcileResult, Tx, TxRequest};
+use crate::messages::{Traffic, Connect, PeerTx, ReconcileRequest, ReconcileResult, Tx, TxRequest};
 
 const RECONCILIATION_CAPACITY: usize = 128;
 
@@ -22,7 +22,6 @@ pub enum PeerId {
 }
 
 /// Describes single independent peer in the network.
-#[derive(Debug)]
 pub struct Peer {
     /// ID of this peer.
     pub id: PeerId,
@@ -43,6 +42,11 @@ pub struct Peer {
     pub reconciliation_set: RecSet<u64>,
 
     seed: u64,
+
+    bytes_sent: usize,
+    bytes_received: usize,
+
+    use_reconciliation: bool,
 }
 
 impl Debug for PeerId {
@@ -76,7 +80,7 @@ impl Into<u64> for PeerId {
 }
 
 impl Peer {
-    pub fn new(id: PeerId) -> Self {
+    pub fn new(id: PeerId, use_reconciliation: bool) -> Self {
         Peer {
             id,
             outbound: HashMap::new(),
@@ -86,6 +90,9 @@ impl Peer {
             received_txs: Default::default(),
             reconciliation_set: RecSet::new(RECONCILIATION_CAPACITY),
             seed: id.into(),
+            bytes_sent: 0,
+            bytes_received: 0,
+            use_reconciliation,
         }
     }
 
@@ -109,7 +116,7 @@ impl Actor for Peer {
     fn started(&mut self, ctx: &mut Self::Context) {
         ctx.run_later(Duration::from_secs(1), |act, _| {
             if !act.is_public() {
-                let mut tx_data = [0u8; 32];
+                let mut tx_data = [0u8; 1024];
                 let mut seed = [0u8; 16];
                 LittleEndian::write_u64(&mut seed, act.seed);
                 let mut rng = XorShiftRng::from_seed(seed);
@@ -117,10 +124,13 @@ impl Actor for Peer {
                 let tx = Tx(tx_data);
 
                 if let Some(addr) = act.outbound.values().collect::<Vec<_>>().first() {
-                    addr.do_send(PeerTx {
+                    let peer_tx = PeerTx {
                         from: act.id,
                         data: tx,
-                    });
+                    };
+
+                    addr.do_send(peer_tx);
+                    act.bytes_sent += peer_tx.size_bytes();
                 }
 
                 act.seed = rng.gen();
@@ -128,7 +138,7 @@ impl Actor for Peer {
         });
 
         ctx.run_later(Duration::from_secs(5), |peer, _ct| {
-            println!(
+            /*println!(
                 "Peer {:?} outbound connections: {:?}",
                 peer.id,
                 peer.outbound.keys().collect::<Vec<_>>()
@@ -137,25 +147,29 @@ impl Actor for Peer {
                 "Peer {:?} inbound connections: {:?}",
                 peer.id,
                 peer.inbound.keys().collect::<Vec<_>>()
-            );
+            );*/
 
             let mut txs = peer.mempool.values().map(|tx| tx.short_id()).collect::<Vec<_>>();
             txs.sort();
             println!("Peer {:?} txs: {:?}", peer.id, txs);
+            println!("Peer {:?} traffic: {} bytes", peer.id, peer.bytes_received + peer.bytes_sent);
         });
 
-        ctx.run_interval(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
-            for (_, peer_addr) in peer.outbound.iter() {
-                let sketch = peer.reconciliation_set.sketch();
-                let msg = ReconcileRequest {
-                    from_addr: ctx.address(),
-                    from_id: peer.id,
-                    sketch,
-                };
+        if self.use_reconciliation {
+            ctx.run_later(Duration::from_secs(RECONCIL_TIMEOUT_SEC), |peer, ctx| {
+                for (_, peer_addr) in peer.outbound.iter() {
+                    let sketch = peer.reconciliation_set.sketch();
+                    let msg = ReconcileRequest {
+                        from_addr: ctx.address(),
+                        from_id: peer.id,
+                        sketch,
+                    };
 
-                peer_addr.do_send(msg);
-            }
-        });
+                    peer.bytes_sent += msg.size_bytes();
+                    peer_addr.do_send(msg);
+                }
+            });
+        }
     }
 
     fn stopping(&mut self, _: &mut Self::Context) -> Running {
@@ -167,6 +181,8 @@ impl Handler<PeerTx> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: PeerTx, _ctx: &mut Context<Self>) {
+        self.bytes_received += msg.size_bytes();
+
         let txid = msg.data.short_id();
 
         // Don't relay nor save already processed transaction
@@ -188,29 +204,47 @@ impl Handler<PeerTx> for Peer {
             txs.push(txid);
         }
 
-        // Perform low-fanout flooding if it's a public node
-        if self.is_public() {
-            let mut seed = [0u8; 16];
-            LittleEndian::write_u64(&mut seed, self.seed);
+        if self.use_reconciliation {
+            // Perform low-fanout flooding if it's a public node
+            if self.is_public() {
+                let mut seed = [0u8; 16];
+                LittleEndian::write_u64(&mut seed, self.seed);
 
-            let mut rng = XorShiftRng::from_seed(seed);
+                let mut rng = XorShiftRng::from_seed(seed);
 
-            let peers = self.outbound.clone();
-            {
-                let mut peers = peers.iter().collect::<Vec<_>>();
-                peers.shuffle(&mut rng);
+                let peers = self.outbound.clone();
+                {
+                    let mut peers = peers.iter().collect::<Vec<_>>();
+                    peers.shuffle(&mut rng);
 
-                for (_, peer) in peers.into_iter().take(8) {
-                    let new_msg = PeerTx {
-                        from: self.id,
-                        data: msg.data,
-                    };
+                    for (_, peer) in peers.into_iter().take(8) {
+                        let new_msg = PeerTx {
+                            from: self.id,
+                            data: msg.data,
+                        };
 
-                    peer.do_send(new_msg);
+                        peer.do_send(new_msg);
+                        self.bytes_sent += new_msg.size_bytes();
+                    }
                 }
-            }
 
-            self.seed = rng.gen();
+                self.seed = rng.gen();
+            }
+        } else {
+            // Just flood the transaction to outbound and inbound peers
+            for (id, peer) in self.outbound.iter().chain(self.inbound.iter()) {
+                if *id == msg.from {
+                    continue
+                }
+
+                let new_msg = PeerTx {
+                    from: self.id,
+                    data: msg.data,
+                };
+
+                peer.do_send(new_msg);
+                self.bytes_sent += new_msg.size_bytes();
+            }
         }
     }
 }
@@ -219,6 +253,8 @@ impl Handler<Connect> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: Connect, ctx: &mut Context<Self>) {
+        self.bytes_received += msg.size_bytes();
+
         // Don't connect to self
         if msg.from_id == self.id {
             return;
@@ -242,10 +278,13 @@ impl Handler<Connect> for Peer {
 
         if !is_private && !self.is_connected_to(msg.from_id) {
             self.add_outbound_peer(msg.from_id, msg.from_addr.clone());
-            msg.from_addr.do_send(Connect {
+            let connect = Connect {
                 from_addr: ctx.address(),
                 from_id: self.id,
-            });
+            };
+
+            self.bytes_sent += connect.size_bytes();
+            msg.from_addr.do_send(connect);
         }
     }
 }
@@ -254,6 +293,8 @@ impl Handler<ReconcileRequest> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: ReconcileRequest, ctx: &mut Self::Context) -> Self::Result {
+        self.bytes_received += msg.size_bytes();
+
         if let Ok(missing) = self.reconciliation_set.reconcile_with(&msg.sketch) {
             let rec_res = ReconcileResult {
                 from_addr: ctx.address(),
@@ -261,6 +302,7 @@ impl Handler<ReconcileRequest> for Peer {
                 missing,
             };
 
+            self.bytes_sent += rec_res.size_bytes();
             msg.from_addr.do_send(rec_res);
         }
     }
@@ -270,6 +312,8 @@ impl Handler<ReconcileResult> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: ReconcileResult, ctx: &mut Self::Context) -> Self::Result {
+        self.bytes_received += msg.size_bytes();
+
         for txid in msg.missing {
             let req_tx = TxRequest {
                 from_addr: ctx.address(),
@@ -277,6 +321,7 @@ impl Handler<ReconcileResult> for Peer {
                 txid,
             };
 
+            self.bytes_sent += req_tx.size_bytes();
             msg.from_addr.do_send(req_tx);
         }
     }
@@ -286,14 +331,16 @@ impl Handler<TxRequest> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: TxRequest, _ctx: &mut Self::Context) -> Self::Result {
+        self.bytes_received += msg.size_bytes();
+
         if let Some(tx) = self.mempool.get(&msg.txid) {
             let tx_msg = PeerTx {
                 from: self.id,
                 data: *tx,
             };
 
+            self.bytes_sent += tx_msg.size_bytes();
             msg.from_addr.do_send(tx_msg);
-            return;
         }
     }
 }

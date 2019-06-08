@@ -11,20 +11,21 @@ const NUM_PRIVATE_NODES: u32 = 8;
 const NUM_PUBLIC_NODES: u32 = 2;
 
 pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
+pub const USE_RECONCILIATION: bool = true;
 
 fn main() {
     actix::System::run(|| {
         let mut public_nodes = vec![];
         for id in 0u32..NUM_PUBLIC_NODES {
             let peer_id = PeerId::Public(id);
-            let peer = peer::Peer::new(peer_id);
+            let peer = peer::Peer::new(peer_id, USE_RECONCILIATION);
             public_nodes.push((peer_id, Arbiter::start(|_| peer)));
         }
 
         let mut private_nodes = vec![];
         for id in 0u32..NUM_PRIVATE_NODES {
             let peer_id = PeerId::Private(id);
-            let mut peer = peer::Peer::new(peer_id);
+            let mut peer = peer::Peer::new(peer_id, USE_RECONCILIATION);
             for (id, pub_peer) in public_nodes.iter() {
                 peer.add_outbound_peer(*id, pub_peer.clone());
             }
