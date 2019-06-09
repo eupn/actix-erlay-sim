@@ -55,7 +55,7 @@ priv7: 9288 ↑ 15480 ↓ (bytes)
 Now we enable [Erlay] which is using set reconciliation (`-r` flag) instead of flooding for tx propagation:
 
 ```bash
-cargo run -- --numprivate=8 --numpublic=2 --r
+cargo run -- --numprivate=8 --numpublic=2 -r
 ```
 
 In this case, overall traffic will be `357488` bytes.
