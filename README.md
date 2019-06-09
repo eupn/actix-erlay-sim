@@ -78,7 +78,7 @@ As we can see, [Erlay] benefits us with `100 - 357488.0 / 429488.0 * 100 = 16.8`
 
 ### Graphs
 
-1. Used bandwidth in bytes depending on number of private nodes (1-200) with two (2) public nodes:
+1. Used bandwidth in bytes depending on number of private nodes (1-500) with two (2) public nodes:
 
 ![](assets/bandwidth.png)
 
