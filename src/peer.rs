@@ -16,8 +16,6 @@ use crate::messages::{
 };
 use crate::traffic_counter::TrafficCounter;
 
-const RECONCILIATION_CAPACITY: usize = 200;
-
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub enum PeerId {
     Public(u32),
@@ -49,6 +47,7 @@ pub struct Peer {
     bytes_sent: u64,
     bytes_received: u64,
     traffic_counter_addr: Addr<TrafficCounter>,
+    traffic_timeout: u64,
 
     use_reconciliation: bool,
 }
@@ -87,7 +86,9 @@ impl Peer {
     pub fn new(
         id: PeerId,
         use_reconciliation: bool,
+        reconciliation_capacity: usize,
         traffic_counter_addr: Addr<TrafficCounter>,
+        traffic_timeout: u64,
         seed: Option<u64>,
     ) -> Self {
         Peer {
@@ -97,11 +98,12 @@ impl Peer {
 
             mempool: Default::default(),
             received_txs: Default::default(),
-            reconciliation_set: RecSet::new(RECONCILIATION_CAPACITY),
+            reconciliation_set: RecSet::new(reconciliation_capacity),
             seed: seed.unwrap_or(0u64) + Into::<u64>::into(id),
             bytes_sent: 0,
             bytes_received: 0,
             traffic_counter_addr,
+            traffic_timeout,
             use_reconciliation,
         }
     }
@@ -148,7 +150,7 @@ impl Actor for Peer {
             }
         });
 
-        ctx.run_later(Duration::from_secs(30), |peer, _ct| {
+        ctx.run_later(Duration::from_secs(self.traffic_timeout.saturating_sub(1)), |peer, _ct| {
             /*println!(
                 "Peer {:?} outbound connections: {:?}",
                 peer.id,

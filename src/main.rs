@@ -11,7 +11,7 @@ use actix::prelude::*;
 use crate::traffic_counter::TrafficCounter;
 use structopt::*;
 
-pub const RECONCIL_TIMEOUT_SEC: u64 = 2;
+pub const RECONCIL_TIMEOUT_SEC: u64 = 1;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -36,11 +36,18 @@ struct SimulatorParameters {
     pub seed: Option<u64>,
 }
 
+fn estimate_traffic_timeout_sec(parameters: &SimulatorParameters) -> u64 {
+    (parameters.num_private_nodes as f32 * 0.57f32 + parameters.num_public_nodes as f32 * 1f32)
+        as u64
+}
+
 fn main() {
     let parameters = SimulatorParameters::from_args();
 
+    let traffic_timeout = estimate_traffic_timeout_sec(&parameters);
+
     let _ = actix::System::run(move || {
-        let tcounter = TrafficCounter::new().start();
+        let tcounter = TrafficCounter::new(traffic_timeout).start();
 
         let mut public_nodes = vec![];
         for id in 0u32..parameters.num_public_nodes {
@@ -48,7 +55,9 @@ fn main() {
             let peer = peer::Peer::new(
                 peer_id,
                 parameters.use_reconciliation,
+                parameters.num_private_nodes as usize,
                 tcounter.clone(),
+                traffic_timeout,
                 parameters.seed,
             );
             public_nodes.push((peer_id, peer.start()));
@@ -60,7 +69,9 @@ fn main() {
             let mut peer = peer::Peer::new(
                 peer_id,
                 parameters.use_reconciliation,
+                parameters.num_private_nodes as usize,
                 tcounter.clone(),
+                traffic_timeout,
                 parameters.seed,
             );
             for (id, pub_peer) in public_nodes.iter() {

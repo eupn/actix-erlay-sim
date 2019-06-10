@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for priv in 1 21 41 61 81 101 121 141 161 181 200
+for priv in 420 440 480 500
 do
     for pub in 2
     do

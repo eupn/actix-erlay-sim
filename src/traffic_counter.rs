@@ -2,8 +2,8 @@ use crate::messages::TrafficReport;
 use crate::peer::PeerId;
 use actix::prelude::*;
 use std::collections::HashMap;
-use std::time::Duration;
 use std::process;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Default)]
 pub struct TrafficData {
@@ -13,12 +13,14 @@ pub struct TrafficData {
 
 pub struct TrafficCounter {
     pub traffic: HashMap<PeerId, TrafficData>,
+    pub traffic_timeout_sec: u64,
 }
 
 impl TrafficCounter {
-    pub fn new() -> Self {
+    pub fn new(timeout: u64) -> Self {
         TrafficCounter {
             traffic: Default::default(),
+            traffic_timeout_sec: timeout,
         }
     }
 }
@@ -27,7 +29,7 @@ impl Actor for TrafficCounter {
     type Context = actix::Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_later(Duration::from_secs(31), |act, _| {
+        ctx.run_later(Duration::from_secs(self.traffic_timeout_sec), |act, _| {
             let total_traffic = act
                 .traffic
                 .values()
