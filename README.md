@@ -79,8 +79,9 @@ As we can see, [Erlay] benefits us with `100 - 357488.0 / 429488.0 * 100 = 16.8`
 ### Graphs
 
 1. Used bandwidth in bytes depending on number of private nodes (1-500) with two (2) public nodes:
-
-![](assets/bandwidth.png)
+    ![](assets/bandwidth.png)
+2. Used bandwidth in bytes depending on number of private nodes (10-300) with eight (8) public nodes:
+    ![](assets/bandwidth_8_public.png)
 
 [SipHasher24]: https://docs.rs/siphasher/0.3.0/siphasher/sip/struct.SipHasher24.html
 [Actix]: https://github.com/actix/actix
