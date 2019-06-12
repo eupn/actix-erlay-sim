@@ -9,10 +9,13 @@ It includes:
 * `TrafficCounter` actor that reads reports on used traffic from peers
 * Various protocol messages for connection, tx propagation and set reconciliation
 
+>Note that set difference estimation and sketch bisection are omitted in this simulator. 
+However, this can change in future.
+
 It creates a network of public and private peers. 
 Each private peer announces a single transaction of 1024 bytes to a single random outbound peer.
 
-Short IDs of the transactions are based on [SipHasher24] and are 64-bit wide.
+Short IDs of the transactions are based on [SipHash2-4] and are 64-bit wide.
 
 ### Example
 
@@ -83,7 +86,7 @@ As we can see, [Erlay] benefits us with `100 - 357488.0 / 429488.0 * 100 = 16.8`
 2. Used bandwidth in bytes depending on number of private nodes (10-300) with eight (8) public nodes:
     ![](assets/bandwidth_8_public.png)
 
-[SipHasher24]: https://docs.rs/siphasher/0.3.0/siphasher/sip/struct.SipHasher24.html
+[SipHash2-4]: https://docs.rs/siphasher/0.3.0/siphasher/sip/struct.SipHasher24.html
 [Actix]: https://github.com/actix/actix
 [Erlay]: https://arxiv.org/pdf/1905.10518.pdf
 [minisketch-rs]: https://github.com/eupn/minisketch-rs
